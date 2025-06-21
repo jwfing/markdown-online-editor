@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -7,6 +6,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/AuthContext';
 import { FileText, LogOut, Download, Eye } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
+import { marked } from 'marked';
+import 'github-markdown-css/github-markdown-light.css';
 
 const Index = () => {
   const { user, signOut, loading } = useAuth();
@@ -36,11 +39,124 @@ const Index = () => {
     }
   };
 
-  const handleExportPDF = () => {
-    toast({
-      title: "PDF Export",
-      description: "PDF export feature coming soon!",
-    });
+  const handleExportPDF = async () => {
+    try {
+      // 显示加载提示
+      toast({
+        title: "Generating PDF...",
+        description: "Please wait, we are processing your document.",
+      });
+
+      // 创建一个临时的预览容器
+      const tempContainer = document.createElement('div');
+      tempContainer.style.position = 'absolute';
+      tempContainer.style.left = '-9999px';
+      tempContainer.style.top = '0';
+      tempContainer.style.width = '800px';
+      tempContainer.style.padding = '40px';
+      tempContainer.style.backgroundColor = 'white';
+      tempContainer.style.fontFamily = 'Arial, sans-serif';
+      tempContainer.style.fontSize = '14px';
+      tempContainer.style.lineHeight = '1.6';
+      tempContainer.style.color = '#333';
+      
+      // 将 markdown 转换为 HTML 并添加到临时容器
+      tempContainer.innerHTML = convertMarkdownToHtml(markdown);
+      tempContainer.className = 'markdown-body';
+      
+      document.body.appendChild(tempContainer);
+
+      // 使用 html2canvas 将内容转换为图片
+      const canvas = await html2canvas(tempContainer, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#ffffff',
+        width: 800,
+        height: tempContainer.scrollHeight,
+      });
+
+      // 移除临时容器
+      document.body.removeChild(tempContainer);
+
+      // 创建 PDF
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      
+      // A4 尺寸设置
+      const pageWidth = 210; // A4 宽度 (mm)
+      const pageHeight = 297; // A4 高度 (mm)
+      const margin = 20; // 页边距 (mm)
+      const contentWidth = pageWidth - 2 * margin; // 内容区域宽度
+      const contentHeight = pageHeight - 2 * margin; // 内容区域高度
+      
+      // 计算图片在 PDF 中的尺寸
+      const imgWidth = contentWidth;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      
+      // 计算需要多少页
+      const totalHeight = imgHeight;
+      const pagesNeeded = Math.ceil(totalHeight / contentHeight);
+      
+      for (let page = 0; page < pagesNeeded; page++) {
+        if (page > 0) {
+          pdf.addPage();
+        }
+        
+        // 计算当前页应该显示的内容位置（精确到像素）
+        const sourceY = Math.floor(page * contentHeight * (canvas.width / imgWidth));
+        const sourceHeight = Math.min(
+          Math.floor(contentHeight * (canvas.width / imgWidth)),
+          canvas.height - sourceY
+        );
+        
+        // 确保不会超出画布边界
+        if (sourceY >= canvas.height) {
+          break;
+        }
+        
+        // 创建当前页的 canvas
+        const pageCanvas = document.createElement('canvas');
+        const pageCtx = pageCanvas.getContext('2d');
+        pageCanvas.width = canvas.width;
+        pageCanvas.height = sourceHeight;
+        
+        // 绘制当前页的内容
+        pageCtx?.drawImage(
+          canvas,
+          0, sourceY, canvas.width, sourceHeight,
+          0, 0, canvas.width, sourceHeight
+        );
+        
+        // 将当前页转换为图片并添加到 PDF
+        const pageImgData = pageCanvas.toDataURL('image/png');
+        const actualContentHeight = Math.min(contentHeight, (sourceHeight * contentWidth) / canvas.width);
+        
+        pdf.addImage(
+          pageImgData, 
+          'PNG', 
+          margin, 
+          margin, 
+          contentWidth, 
+          actualContentHeight
+        );
+      }
+
+      // 下载 PDF
+      const fileName = `markdown-document-${new Date().getTime()}.pdf`;
+      pdf.save(fileName);
+
+      toast({
+        title: "PDF export successful",
+        description: `Document saved as ${fileName}`,
+      });
+    } catch (error) {
+      console.error('PDF export failed:', error);
+      toast({
+        title: "PDF export failed",
+        description: "There was an error generating the PDF. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   if (loading) {
@@ -58,16 +174,9 @@ const Index = () => {
     return null; // Will redirect to auth page
   }
 
-  // Simple markdown to HTML conversion for preview
+  // markdown 转 HTML，包裹 markdown-body 样式
   const convertMarkdownToHtml = (text: string) => {
-    return text
-      .replace(/^# (.*$)/gim, '<h1 class="text-3xl font-bold mb-4">$1</h1>')
-      .replace(/^## (.*$)/gim, '<h2 class="text-2xl font-semibold mb-3">$1</h2>')
-      .replace(/^### (.*$)/gim, '<h3 class="text-xl font-medium mb-2">$1</h3>')
-      .replace(/\*\*(.*)\*\*/gim, '<strong class="font-bold">$1</strong>')
-      .replace(/\*(.*)\*/gim, '<em class="italic">$1</em>')
-      .replace(/^> (.*$)/gim, '<blockquote class="border-l-4 border-gray-300 pl-4 italic text-gray-600 my-2">$1</blockquote>')
-      .replace(/\n/gim, '<br>');
+    return `<div class='markdown-body'>${marked.parse(text)}</div>`;
   };
 
   return (
@@ -138,7 +247,7 @@ const Index = () => {
             </CardHeader>
             <CardContent>
               <div 
-                className="min-h-[500px] prose prose-sm max-w-none"
+                className="min-h-[500px] prose prose-sm max-w-none markdown-body"
                 dangerouslySetInnerHTML={{ 
                   __html: convertMarkdownToHtml(markdown) 
                 }}
