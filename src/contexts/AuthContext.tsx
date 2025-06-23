@@ -33,21 +33,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Handle the OAuth callback - this processes the URL parameters from Google OAuth
+    const handleAuthCallback = async () => {
+      const { data, error } = await supabase.auth.getSession();
+      if (error) {
+        console.error('Error getting session:', error);
+      } else if (data.session) {
+        setSession(data.session);
+        setUser(data.session.user);
+      }
+      setLoading(false);
+    };
+
     // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
+      async (event, session) => {
+        console.log('Auth state change:', event, session);
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
+        
+        // Clean up URL after successful OAuth callback
+        if (event === 'SIGNED_IN' && window.location.hash) {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
       }
     );
 
-    // Check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
+    // Initial session check and OAuth callback handling
+    handleAuthCallback();
 
     return () => subscription.unsubscribe();
   }, []);
